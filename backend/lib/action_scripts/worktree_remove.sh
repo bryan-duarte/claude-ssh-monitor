@@ -4,6 +4,8 @@
 # Prints result=ok|gone|main_checkout|process_inside|dirty|remote_error|branch_not_merged and details.
 LC_ALL=C
 export LC_ALL
+# A repository config must not run code from a probe: no fsmonitor, no hooks.
+git() { command git -c core.fsmonitor=false -c core.hooksPath=/dev/null "$@"; }
 worktree_dir="$1"
 force="$2"
 branch="$3"

@@ -7,6 +7,8 @@
 # lib/parse.awk reads it.
 LC_ALL=C
 export LC_ALL
+# A repository config must not run code from a probe: no fsmonitor, no hooks.
+git() { command git -c core.fsmonitor=false -c core.hooksPath=/dev/null "$@"; }
 default_top_n=30
 top_n="${1:-$default_top_n}"
 percent_scale=100

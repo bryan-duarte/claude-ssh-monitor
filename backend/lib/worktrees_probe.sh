@@ -8,6 +8,8 @@
 # one in "<repo>/.git/worktrees/<name>/gitdir", so the tool that made a worktree does not matter.
 LC_ALL=C
 export LC_ALL
+# A repository config must not run code from a probe: no fsmonitor, no hooks.
+git() { command git -c core.fsmonitor=false -c core.hooksPath=/dev/null "$@"; }
 default_max_depth=7
 default_merged_branches='main,master,develop,trunk'
 max_depth="${1:-$default_max_depth}"
