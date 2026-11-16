@@ -1,0 +1,36 @@
+export const UI_GLYPHS = {
+  gauge: '◔',
+  bot: '◉',
+  plug: '⏚',
+  'folder-git-2': '⎇',
+  container: '⬡',
+  activity: '∿',
+  cpu: '▣',
+  'memory-stick': '▤',
+  'hard-drive': '▭',
+  'arrow-down-up': '⇅',
+  'git-branch': '⎇',
+  microchip: '▦',
+  server: '▣',
+  history: '↺',
+  pin: '◆',
+  'external-link': '↗',
+  square: '■',
+  'trash-2': '✕',
+  'square-x': '✕',
+  'triangle-alert': '⚠',
+  keyboard: '⌨',
+  archive: '▤',
+  layers: '≡',
+  'git-merge': '⑂',
+  'file-diff': '±',
+  'arrow-down-to-line': '⤓',
+  'arrow-down-wide-narrow': '⇣',
+  check: '✓',
+  close: '✕',
+  more: '⋯',
+} as const
+
+export type UiGlyphName = keyof typeof UI_GLYPHS
+
+export const uiGlyph = (name: UiGlyphName): string => UI_GLYPHS[name]

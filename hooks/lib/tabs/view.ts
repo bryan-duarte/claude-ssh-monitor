@@ -25,6 +25,7 @@ export type TabActions = {
   togglePin: (port: ListeningPort) => void
   openPort: (port: ListeningPort) => void
   stopTunnel: (port: ListeningPort) => void
+  portMenu: (port: ListeningPort, hasTunnel: boolean) => void
   sortBy: (sort: ConsoleChoices['sort']) => void
   filterWorktrees: (filter: WorktreeFilter) => void
   showAllWorktrees: () => void

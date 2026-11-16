@@ -1,5 +1,5 @@
 import { measureGuidance } from '../failure-guidance'
-import { age, ageSince, daysSince, storageSize } from '../format'
+import { age, ageSince, compactSize, daysSince, storageSize } from '../format'
 import { TOKYO_NIGHT as c, GRADIENTS, gradientAt, mixColors } from '../palette'
 import type { HostWorktrees, WorktreeFilter, WorktreeItem } from '../schemas'
 import { WORKTREE_FILTERS } from '../schemas'
@@ -8,14 +8,18 @@ import type { Tree } from '../ui/ui'
 import {
   AGENT_MARKER,
   type ChoiceOption,
-  filterChips,
+  dropdown,
   fixedCell,
+  growCell,
+  iconLabel,
+  iconPicker,
+  isTerminal,
   meter,
   panel,
   panelTitle,
   rowButton,
   textButton,
-  type UiGlyphName,
+  toolbar,
   uiGlyph,
 } from '../ui/widgets'
 import {
@@ -32,21 +36,16 @@ const PERCENT_SCALE = 100
 const SIZE_METER_CELLS = 5
 const ROWS_BEFORE_MORE = 40
 const MERGED_TAG_TINT = 0.18
-const FILTER_GLYPHS: Record<WorktreeFilter, UiGlyphName> = {
-  all: 'layers',
-  stale: 'archive',
-  merged: 'git-merge',
-  changed: 'file-diff',
-  agent: 'bot',
-  behind: 'arrow-down-to-line',
-}
 const COLUMNS = {
   size: 8,
-  changes: 6,
+  compactSize: 5,
+  mark: 1,
+  changes: 4,
   age: 5,
   delete: 2,
-  wide: { tool: 12, repository: 14 },
-  narrow: { tool: 2, repository: 10 },
+  repository: 14,
+  wide: { tool: 12 },
+  narrow: { tool: 2 },
 } as const
 
 function deleteButton(view: TabView, worktree: WorktreeItem, hasAgent: boolean): Tree {
@@ -59,12 +58,13 @@ function deleteButton(view: TabView, worktree: WorktreeItem, hasAgent: boolean):
   })
 }
 
-function mergedTag(view: TabView): Tree {
+function mergedMark(view: TabView): Tree {
   const { Text } = view.ui.el
+  const isTagRoomy = view.isWide && view.ui.surface === 'terminal'
+  if (!isTagRoomy) return <Text color={c.green}>{uiGlyph('check')}</Text>
   return (
     <Text color={c.green} backgroundColor={mixColors(c.backgroundDark, c.green, MERGED_TAG_TINT)}>
-      {' '}
-      merged{' '}
+      {' merged '}
     </Text>
   )
 }
@@ -85,32 +85,20 @@ function worktreeRow(view: TabView, worktree: WorktreeItem, facts: WorktreeFacts
     <Box key={key} columnGap={1}>
       {fixedCell(
         ui,
-        COLUMNS.size,
-        <Text color={gradientAt(GRADIENTS.storage, sizePercent / PERCENT_SCALE)}>{storageSize(worktree.size_kb)}</Text>,
-        true,
+        view.isWide ? COLUMNS.size : COLUMNS.compactSize,
+        <Text color={gradientAt(GRADIENTS.storage, sizePercent / PERCENT_SCALE)}>
+          {view.isWide ? storageSize(worktree.size_kb) : compactSize(worktree.size_kb)}
+        </Text>,
+        view.isWide,
       )}
       {view.isWide ? meter(ui, `${key}-meter`, sizePercent, SIZE_METER_CELLS, GRADIENTS.storage) : null}
       {fixedCell(ui, widths.tool, agentLabel(ui, `${key}-tool`, worktree.tool, view.isWide))}
-      {fixedCell(
-        ui,
-        widths.repository,
-        <Text color={c.blue} wrap="truncate-end">
-          {worktree.repository}
-        </Text>,
-      )}
-      <Box flexGrow={1} flexShrink={1} columnGap={1} overflow="hidden">
-        {hasAgent ? <Text color={c.green}>{AGENT_MARKER}</Text> : null}
-        <Text color={c.foreground} wrap="truncate-end">
-          {worktree.branch}
-        </Text>
-        {isMergedWorktree(worktree) ? mergedTag(view) : null}
-      </Box>
-      {fixedCell(
-        ui,
-        COLUMNS.changes,
-        <Text color={hasChanges ? c.yellow : c.comment}>{hasChanges ? `±${changedFiles}` : 'clean'}</Text>,
-        true,
-      )}
+      {view.isWide ? fixedCell(ui, COLUMNS.repository, <Text color={c.blue}>{worktree.repository}</Text>) : null}
+      {fixedCell(ui, COLUMNS.mark, hasAgent ? <Text color={c.green}>{AGENT_MARKER}</Text> : null)}
+      {growCell(ui, <Text color={c.foreground}>{worktree.branch}</Text>)}
+      {view.isWide ? null : fixedCell(ui, COLUMNS.mark, isMergedWorktree(worktree) ? mergedMark(view) : null)}
+      {view.isWide && isMergedWorktree(worktree) ? mergedMark(view) : null}
+      {fixedCell(ui, COLUMNS.changes, <Text color={c.yellow}>{hasChanges ? `±${changedFiles}` : ''}</Text>, true)}
       {fixedCell(ui, COLUMNS.age, <Text color={isStale ? c.orange : c.comment}>{days === null ? '?' : `${days}d`}</Text>, true)}
       {fixedCell(ui, COLUMNS.delete, deleteButton(view, worktree, hasAgent), true)}
     </Box>
@@ -130,19 +118,38 @@ function worktreeList(view: TabView, shownWorktrees: WorktreeItem[], facts: Work
   ]
 }
 
-function filterRow(view: TabView, facts: WorktreeFacts): Tree {
+function filterDropdown(view: TabView, facts: WorktreeFacts): Tree {
   const options: ChoiceOption<WorktreeFilter>[] = WORKTREE_FILTERS.map(name => ({
     value: name,
     label: WORKTREE_FILTER_SPECS[name].label,
-    glyph: uiGlyph(FILTER_GLYPHS[name]),
     count: facts.counts[name],
   }))
-  return filterChips(view.ui, {
-    key: `worktree-filters-${view.host.label}`,
+  return dropdown(view.ui, {
+    key: `worktree-filter-${view.host.label}`,
+    label: 'show',
     options,
     selected: view.choices.filter,
     onSelect: view.act.filterWorktrees,
   })
+}
+
+export function worktreesToolbar(view: TabView): Tree {
+  if (!isTerminal(view.ui)) return null
+  const { Box, Text } = view.ui.el
+  const worktrees = worktreesOfHost(view.worktrees, view.host)
+  if (worktrees.state === 'pending' && worktrees.items.length === 0) return null
+  const facts = worktreeFacts(worktrees.items, view.agents)
+  return toolbar(
+    view.ui,
+    'worktrees-toolbar',
+    [iconPicker(view.ui, 'layers', filterDropdown(view, facts))],
+    [
+      <Box columnGap={1} alignItems="center">
+        {iconLabel(view.ui, 'archive', 'reclaimable', c.orange)}
+        <Text color={c.orange}>{storageSize(facts.reclaimableKib)}</Text>
+      </Box>,
+    ],
+  )
 }
 
 function measureNote(view: TabView, worktrees: HostWorktrees): Tree {
@@ -156,18 +163,12 @@ function measureNote(view: TabView, worktrees: HostWorktrees): Tree {
 }
 
 function worktreesTitle(view: TabView, totalKib: number | null): Tree {
-  const { Text } = view.ui.el
-  return (
-    <Text>
-      {panelTitle(view.ui, 'folder-git-2', 'worktrees', c.teal)}
-      {totalKib === null ? null : <Text color={c.foreground}>{` ${storageSize(totalKib)}`}</Text>}
-    </Text>
-  )
+  return panelTitle(view.ui, 'folder-git-2', 'worktrees', c.teal, totalKib === null ? undefined : storageSize(totalKib))
 }
 
 export function worktreesPanel(view: TabView): Tree {
   const { ui, host, snapshot } = view
-  const { Box, Text } = ui.el
+  const { Text } = ui.el
   const { settings } = snapshot
   const worktrees = worktreesOfHost(view.worktrees, host)
   const isFirstMeasure = worktrees.state === 'pending' && worktrees.items.length === 0
@@ -185,17 +186,18 @@ export function worktreesPanel(view: TabView): Tree {
   return panel(ui, {
     key: `worktrees-${host.label}`,
     title: worktreesTitle(view, worktrees.total_kb),
-    rightTitle: <Text color={c.comment}>{ageSince(worktrees.measured_at)}</Text>,
+    rightTitle: isTerminal(ui) ? (
+      <Text color={c.comment}>{ageSince(worktrees.measured_at)}</Text>
+    ) : (
+      <Text>
+        <Text color={c.comment}>reclaimable </Text>
+        <Text color={c.orange}>{storageSize(facts.reclaimableKib)}</Text>
+        <Text color={c.comment}>{` · measured ${ageSince(worktrees.measured_at)}`}</Text>
+      </Text>
+    ),
+    actions: isTerminal(ui) ? undefined : iconPicker(ui, 'layers', filterDropdown(view, facts)),
     children: [
       measureNote(view, worktrees),
-      <Box key="worktree-tools" flexWrap="wrap" justifyContent="space-between" columnGap={2}>
-        {filterRow(view, facts)}
-        <Text>
-          <Text color={c.orange}>{`${uiGlyph('archive')} `}</Text>
-          <Text color={c.comment}>reclaimable from stale: </Text>
-          <Text color={c.orange}>{storageSize(facts.reclaimableKib)}</Text>
-        </Text>
-      </Box>,
       ...worktreeList(view, shownWorktrees, facts),
       <Text color={c.comment}>{measuredText}</Text>,
     ],

@@ -2,15 +2,17 @@ import { homeRelative } from '../format'
 import { TOKYO_NIGHT as c, mixColors } from '../palette'
 import type { AgentProcess, ListeningPort, Tunnel } from '../schemas'
 import { OPENING_TUNNEL_NOTE, portNoteKey, tunnelOfPort } from '../tunnels'
-import { agentLabel, programLabel } from '../ui/icons'
+import { agentIcon, agentLabel, programLabel } from '../ui/icons'
 import type { Tree } from '../ui/ui'
-import { fixedCell, killButton, panel, panelTitle, rowButton } from '../ui/widgets'
+import { fixedCell, growCell, isTerminal, killButton, panel, panelTitle, rowButton } from '../ui/widgets'
 import type { TabView } from './view'
 
 const FIRST_KILLABLE_PID = 2
 const DOWN_ROW_TINT = 0.12
+const PIN_MARK = '●'
 const COLUMNS = {
   pin: 2,
+  compactPort: 8,
   port: 7,
   open: 16,
   kill: 2,
@@ -109,6 +111,43 @@ function killCell(view: TabView, port: ListeningPort): Tree {
   return fixedCell(view.ui, COLUMNS.kill, killButton(view.ui, `port-kill-${view.host.label}-${port.port}`, onKill), true)
 }
 
+const isCompact = (view: TabView): boolean => !view.isWide || !isTerminal(view.ui)
+
+function compactPortRow(view: TabView, port: ListeningPort, context: PortRowContext): Tree {
+  const { ui, host } = view
+  const { Box, Text } = ui.el
+  const owner = agentProcessWithPid(view, port.agent_pid)
+  const portColor = isDown(port) ? c.red : context.tunnel ? c.green : port.pinned ? c.blue : c.cyan
+  const portText = `${context.tunnel ? '↗' : ':'}${port.port}${port.pinned ? ` ${PIN_MARK}` : ''}`
+  return (
+    <Box key={`port-${host.label}-${port.port}`} flexDirection="column">
+      <Box columnGap={1} alignItems="center">
+        {fixedCell(ui, COLUMNS.compactPort, <Text color={portColor}>{portText}</Text>)}
+        {growCell(ui, processLabel(view, port))}
+        {fixedCell(ui, COLUMNS.narrow.agent, owner ? agentIcon(ui, `port-agent-${host.label}-${port.port}`, owner.app) : null)}
+        {fixedCell(
+          ui,
+          COLUMNS.kill,
+          rowButton(ui, {
+            key: `port-menu-${host.label}-${port.port}`,
+            glyph: 'more',
+            onPress: () => view.act.portMenu(port, context.tunnel !== null),
+          }),
+          true,
+        )}
+      </Box>
+      {isFailureNote(context.note) ? <Text color={c.red}>{`  ${context.note}`}</Text> : null}
+    </Box>
+  )
+}
+
+function processLabel(view: TabView, port: ListeningPort): Tree {
+  const key = `port-process-${view.host.label}-${port.port}`
+  if (isDown(port)) return programLabel(view.ui, key, 'down', c.red)
+  if (!port.process) return programLabel(view.ui, key, 'other user', c.comment)
+  return programLabel(view.ui, `port-process-${view.host.label}-${port.port}`, port.process, c.foregroundDark)
+}
+
 function portRow(view: TabView, port: ListeningPort): Tree {
   const { ui, host } = view
   const { Box, Text } = ui.el
@@ -118,6 +157,7 @@ function portRow(view: TabView, port: ListeningPort): Tree {
     tunnel: tunnelOfPort(view.tunnels, host.label, port.port),
     note: view.portNotes[portNoteKey(host.label, port.port)] ?? '',
   }
+  if (isCompact(view)) return compactPortRow(view, port, context)
   const rowBackground = isDown(port) ? mixColors(c.background, c.red, DOWN_ROW_TINT) : undefined
   return (
     <Box key={`port-${host.label}-${port.port}`} flexDirection="column">
@@ -126,7 +166,7 @@ function portRow(view: TabView, port: ListeningPort): Tree {
         {fixedCell(ui, COLUMNS.port, <Text color={isDown(port) ? c.red : c.cyan}>{`:${port.port}`}</Text>, true)}
         {processCell(view, port)}
         {agentCell(view, owner, port)}
-        <Box flexGrow={1} flexShrink={1} overflow="hidden">
+        <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
           <Text color={c.comment} wrap="truncate-end">
             {owner ? homeRelative(owner.cwd, host.home) : ''}
           </Text>
@@ -144,13 +184,22 @@ function tableHeader(view: TabView): Tree {
   const { Box, Text } = ui.el
   const widths = columnsOf(view)
   const heading = (label: string): Tree => <Text color={c.comment}>{label}</Text>
+  if (isCompact(view)) {
+    return (
+      <Box key="ports-header" columnGap={1}>
+        {fixedCell(ui, COLUMNS.compactPort, heading('port'))}
+        {growCell(ui, heading('process'))}
+        {fixedCell(ui, COLUMNS.narrow.agent + COLUMNS.kill + 1, null)}
+      </Box>
+    )
+  }
   return (
     <Box key="ports-header" columnGap={1}>
       {fixedCell(ui, COLUMNS.pin, null)}
       {fixedCell(ui, COLUMNS.port, heading('port'), true)}
       {fixedCell(ui, widths.process, heading('process'))}
       {fixedCell(ui, widths.agent, view.isWide ? heading('agent') : null)}
-      <Box flexGrow={1} flexShrink={1}>
+      <Box flexGrow={1} flexShrink={1} minWidth={0}>
         {heading('worktree')}
       </Box>
       {fixedCell(ui, COLUMNS.open, null)}

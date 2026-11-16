@@ -16,7 +16,7 @@ import { CONSOLE_TABS, DEFAULT_CHOICES, isRecord, PROCESS_SORTS, WORKTREE_FILTER
 import { splitWorktrees, worktreesSignature } from './worktrees'
 
 const SHAPE = 'v1'
-const CHOICES_STORE_KEY = 'choices'
+const CHOICES_STORE_KEY = 'choices-v2'
 
 const snapshotAtom = atom({ plugin: 'ssh-monitor', key: 'snapshot' } as const, null, { shape: SHAPE })
 const errorAtom = atom({ plugin: 'ssh-monitor', key: 'error' } as const, null)

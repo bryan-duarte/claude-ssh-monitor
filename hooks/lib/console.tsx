@@ -1,6 +1,6 @@
 import type { EngineInterface as Engine, On } from 'claude-code'
 import { dockerContainerPlan, killPlan, worktreeRemovePlan } from './action-dialogs'
-import { confirmAndRun, previewPrune } from './actions'
+import { choosePortAction, confirmAndRun, previewPrune } from './actions'
 import { agentViews } from './agents'
 import { dockerOfHost } from './docker'
 import { hostHealth } from './health'
@@ -8,7 +8,7 @@ import { CHART_RANGE_SAMPLES, SECONDS_PER_SAMPLE } from './history'
 import { BRAND, CONSOLE_PANE } from './mod'
 import { TOKYO_NIGHT as c, healthColor } from './palette'
 import type { ChartRange, ConsoleChoices, ConsoleTab, HostSnapshot, KeysMessage, Snapshot } from './schemas'
-import { isRecord } from './schemas'
+import { CONSOLE_TABS, isRecord, PROCESS_SORTS, WORKTREE_FILTERS } from './schemas'
 import {
   choose,
   readCheckingPruneOn,
@@ -28,12 +28,26 @@ import {
   updateIsKeyboardOn,
   updateShowAllWorktrees,
 } from './store'
-import { panelsOfTab } from './tabs'
+import { contentOfTab } from './tabs'
 import { isWide, type TabActions, type TabView } from './tabs/view'
 import { openPort, refreshTunnels, stopTunnel, togglePin } from './tunnels'
+import { uiIcon } from './ui/icons'
 import { hostNotesPanel, noticePanel, unreachablePanel, waitingPanel } from './ui/notices'
-import { type Tree, type Ui, uiOf } from './ui/ui'
-import { type ChoiceOption, keycap, SEPARATOR, segmentedControl, tabStrip, textButton, uiGlyph } from './ui/widgets'
+import { forSurface, type Tree, type Ui, uiOf } from './ui/ui'
+import {
+  AGENT_MARKER,
+  type ChoiceOption,
+  divider,
+  dropdown,
+  iconPicker,
+  isTerminal,
+  keycap,
+  SEPARATOR,
+  TITLE_SIZE,
+  tabStrip,
+  textButton,
+  uiGlyph,
+} from './ui/widgets'
 import { worktreesOfHost } from './worktrees'
 
 const KEYS_ELEMENT = 'keys'
@@ -75,72 +89,113 @@ async function onKey($: Engine, key: string): Promise<void> {
   if (host) await selectHost($, host.label)
 }
 
-function header($: Engine, ui: Ui, snapshot: Snapshot | null, host: HostSnapshot | null, choices: ConsoleChoices): Tree {
+const TAB_CHROME_COLUMNS = 4
+const FRAME_PADDING_COLUMNS = 2
+const TERMINAL_SECTION_GAP = 1
+const DESKTOP_SECTION_GAP = 2
+
+function tabColumns(options: ChoiceOption<ConsoleTab>[]): number {
+  return options.reduce((sum, option) => sum + option.label.length + String(option.count ?? '').length + TAB_CHROME_COLUMNS, 0)
+}
+
+type NavigationView = {
+  snapshot: Snapshot | null
+  host: HostSnapshot | null
+  choices: ConsoleChoices
+  bodyColumns: number
+  worktreeCount: number
+  containerCount: number | null
+}
+
+function viewOptions(view: NavigationView): ChoiceOption<ConsoleTab>[] {
+  const { host } = view
+  return [
+    { value: 'overview', label: 'overview' },
+    { value: 'agents', label: 'agents', count: host?.agents.length ?? 0 },
+    { value: 'ports', label: 'ports', count: host?.ports.length ?? 0 },
+    { value: 'worktrees', label: 'worktrees', count: view.worktreeCount },
+    { value: 'docker', label: 'docker', count: view.containerCount },
+    { value: 'procs', label: 'procs', count: view.snapshot?.settings.top_n ?? null },
+  ]
+}
+
+function hostBadge(ui: Ui, host: HostSnapshot, snapshot: Snapshot | null): Tree {
   const { Box, Text } = ui.el
-  const hostOptions: ChoiceOption<string>[] = (snapshot?.hosts ?? []).map(candidate => ({
-    value: candidate.label,
-    label: candidate.label,
-    dotColor: snapshot ? healthColor(hostHealth(candidate, snapshot.settings)) : undefined,
-  }))
+  const healthDot = snapshot ? healthColor(hostHealth(host, snapshot.settings)) : c.comment
   return (
-    <Box key="header" backgroundColor={c.backgroundDark} paddingX={1} columnGap={1} alignItems="center">
-      <Text color={c.foreground} bold>
-        {BRAND}
+    <Box columnGap={1} alignItems="center" flexShrink={0}>
+      {uiIcon(ui, 'server', c.blue)}
+      <Text color={c.blue} weight="semibold" size={TITLE_SIZE}>
+        {host.label}
       </Text>
-      <Box flexGrow={1} flexShrink={1} overflow="hidden">
-        {host && hostOptions.length > 0
-          ? tabStrip(ui, {
-              key: 'hosts',
-              options: hostOptions,
-              selected: host.label,
-              isCompact: false,
-              onSelect: label => void selectHost($, label),
-            })
-          : null}
-      </Box>
-      <Text color={c.comment}>{uiGlyph('history')}</Text>
-      {segmentedControl(ui, {
-        key: 'range',
-        options: RANGE_OPTIONS,
-        selected: choices.range,
-        onSelect: range => void choose($, { range }),
-      })}
-      {textButton(ui, 'close-console', uiGlyph('close'), c.dim, () => void toggleConsole($))}
+      <Text color={healthDot}>{AGENT_MARKER}</Text>
     </Box>
   )
 }
 
-function tabBar(
-  $: Engine,
-  ui: Ui,
-  view: {
-    snapshot: Snapshot | null
-    host: HostSnapshot | null
-    choices: ConsoleChoices
-    isWide: boolean
-    worktreeCount: number
-    containerCount: number | null
-  },
-): Tree {
-  const { Box } = ui.el
-  const { host } = view
-  const options: ChoiceOption<ConsoleTab>[] = [
-    { value: 'overview', label: 'overview', glyph: uiGlyph('gauge') },
-    { value: 'agents', label: 'agents', glyph: uiGlyph('bot'), count: host?.agents.length ?? 0 },
-    { value: 'ports', label: 'ports', glyph: uiGlyph('plug'), count: host?.ports.length ?? 0 },
-    { value: 'worktrees', label: 'worktrees', glyph: uiGlyph('folder-git-2'), count: view.worktreeCount },
-    { value: 'docker', label: 'docker', glyph: uiGlyph('container'), count: view.containerCount },
-    { value: 'procs', label: 'procs', glyph: uiGlyph('activity'), count: view.snapshot?.settings.top_n ?? null },
-  ]
+function hostControl($: Engine, ui: Ui, view: NavigationView): Tree {
+  const { snapshot, host } = view
+  if (!snapshot || !host) return null
+  const hostOptions: ChoiceOption<string>[] = snapshot.hosts.map(candidate => ({
+    value: candidate.label,
+    label: candidate.label,
+    dotColor: healthColor(hostHealth(candidate, snapshot.settings)),
+  }))
+  if (hostOptions.length === 1) return hostBadge(ui, host, snapshot)
+  const onHost = (label: string) => void selectHost($, label)
+  return iconPicker(
+    ui,
+    'server',
+    dropdown(ui, {
+      key: 'host-picker',
+      label: 'host',
+      options: hostOptions,
+      selected: host.label,
+      onSelect: onHost,
+      color: c.blue,
+    }),
+  )
+}
+
+function viewControl($: Engine, ui: Ui, view: NavigationView): Tree {
+  const tabs = viewOptions(view)
+  const onTab = (tab: ConsoleTab) => void choose($, { tab })
+  const hasRoomForTabs = isTerminal(ui) && tabColumns(tabs) <= view.bodyColumns - FRAME_PADDING_COLUMNS
+  if (hasRoomForTabs) return tabStrip(ui, { key: 'console-tabs', options: tabs, selected: view.choices.tab, onSelect: onTab })
+  return iconPicker(
+    ui,
+    'layers',
+    dropdown(ui, { key: 'view-picker', options: tabs, selected: view.choices.tab, onSelect: onTab, isNative: true }),
+    true,
+  )
+}
+
+function rangeControl($: Engine, ui: Ui, choices: ConsoleChoices): Tree {
+  return iconPicker(
+    ui,
+    'history',
+    dropdown(ui, { key: 'range', options: RANGE_OPTIONS, selected: choices.range, onSelect: range => void choose($, { range }) }),
+  )
+}
+
+function header($: Engine, ui: Ui, view: NavigationView): Tree {
+  const { Box, Text } = ui.el
   return (
-    <Box key="tab-bar" backgroundColor={c.backgroundDark} paddingX={1}>
-      {tabStrip(ui, {
-        key: 'console-tabs',
-        options,
-        selected: view.choices.tab,
-        isCompact: !view.isWide,
-        onSelect: tab => void choose($, { tab }),
-      })}
+    <Box key="header" flexDirection="column" paddingX={1} rowGap={1}>
+      <Box columnGap={2} alignItems="flex-start" justifyContent="space-between">
+        <Box columnGap={1} alignItems="center" flexShrink={1} minWidth={0}>
+          {uiIcon(ui, 'gauge', c.blue)}
+          <Text color={c.foreground} weight="semibold" size={TITLE_SIZE} wrap="truncate-end">
+            {BRAND}
+          </Text>
+        </Box>
+        <Box columnGap={2} alignItems="flex-start" flexShrink={0}>
+          {rangeControl($, ui, view.choices)}
+          {hostControl($, ui, view)}
+          {textButton(ui, 'close-console', uiGlyph('close'), c.dim, () => void toggleConsole($))}
+        </Box>
+      </Box>
+      <Box alignItems="center">{viewControl($, ui, view)}</Box>
     </Box>
   )
 }
@@ -148,7 +203,7 @@ function tabBar(
 function footerText(ui: Ui, isKeyboardOn: boolean): Tree {
   const { Box, Text } = ui.el
   return (
-    <Box key="footer" backgroundColor={c.backgroundDark} paddingX={1} columnGap={1}>
+    <Box key="footer" paddingX={1} columnGap={1}>
       <Text color={c.green}>●</Text>
       <Text color={c.comment}>agent</Text>
       <Text color={c.border}>{SEPARATOR}</Text>
@@ -163,7 +218,8 @@ function footerText(ui: Ui, isKeyboardOn: boolean): Tree {
 }
 
 function footer(ui: Ui, isKeyboardOn: boolean): Tree {
-  if (ui.surface === 'terminal' || ui.surface === 'desktop') {
+  if (ui.surface === 'desktop') return null
+  if (ui.surface === 'terminal') {
     const { Client } = ui.el
     return <Client key={KEYS_ELEMENT} module="../client/keys.tsx" props={{ isOn: isKeyboardOn }} width="100%" />
   }
@@ -179,12 +235,42 @@ function tabActions($: Engine, host: HostSnapshot): TabActions {
     togglePin: port => void togglePin($, host, port.port, port.pinned),
     openPort: port => void openPort($, host, port.port),
     stopTunnel: port => void stopTunnel($, host, port.port),
+    portMenu: (port, hasTunnel) => void choosePortAction($, host, port, hasTunnel),
     sortBy: sort => void choose($, { sort }),
     filterWorktrees: filter => {
       void choose($, { filter })
       void updateShowAllWorktrees($, () => false)
     },
     showAllWorktrees: () => void updateShowAllWorktrees($, () => true),
+  }
+}
+
+type DropdownMessage = { type: 'select'; value: string }
+
+const WORKTREE_FILTER_PREFIX = 'worktree-filter-'
+
+const isDropdownMessage = (data: unknown): data is DropdownMessage =>
+  isRecord(data) && data.type === 'select' && typeof data.value === 'string'
+
+const isOneOf = <T extends string | number>(list: readonly T[], candidate: unknown): candidate is T =>
+  list.includes(candidate as T)
+
+async function applyDropdownChoice($: Engine, element: string, value: string): Promise<void> {
+  if (element === 'range') {
+    const range = Number(value)
+    if (isOneOf(CHART_RANGE_SAMPLES, range)) await choose($, { range })
+    return
+  }
+  if (element === 'view-picker' && isOneOf(CONSOLE_TABS, value)) return choose($, { tab: value })
+  if (element === 'sort' && isOneOf(PROCESS_SORTS, value)) return choose($, { sort: value })
+  if (element === 'host-picker') {
+    const hosts = (await readSnapshot($))?.hosts ?? []
+    if (hosts.some(host => host.label === value)) await selectHost($, value)
+    return
+  }
+  if (element.startsWith(WORKTREE_FILTER_PREFIX) && isOneOf(WORKTREE_FILTERS, value)) {
+    await choose($, { filter: value })
+    await updateShowAllWorktrees($, () => false)
   }
 }
 
@@ -222,6 +308,10 @@ export function wireConsole(on: On): void {
   })
 
   on('ui.message', async ($, e, next) => {
+    if (e.requestId === CONSOLE_PANE && isDropdownMessage(e.data)) {
+      await applyDropdownChoice($, e.element, e.data.value)
+      return {}
+    }
     if (e.requestId !== CONSOLE_PANE || e.element !== KEYS_ELEMENT || !isKeysMessage(e.data)) return next(e)
     if (e.data.type === 'focus') await updateIsKeyboardOn($, () => true)
     else await onKey($, e.data.key)
@@ -241,15 +331,16 @@ export function wireConsole(on: On): void {
     const hostNumber = snapshot && host ? snapshot.hosts.indexOf(host) + 1 : 0
     const worktreesByHost = await readWorktrees($)
     const dockerByHost = await readDocker($)
-    const tabBarView = {
+    const navigationView: NavigationView = {
       snapshot,
       host,
       choices,
-      isWide: isWide(bodyColumns),
+      bodyColumns,
       worktreeCount: host ? worktreesOfHost(worktreesByHost, host).items.length : 0,
       containerCount: host ? dockerOfHost(dockerByHost, host).containers.length : null,
     }
     const body: Tree[] = [noticePanel(ui, snapshot, failure)]
+    let tabToolbar: Tree = null
     if (snapshot && host) {
       const isPending = host.state === 'pending'
       if (isPending) body.push(waitingPanel(ui, host, hostNumber))
@@ -275,18 +366,27 @@ export function wireConsole(on: On): void {
           checkingPruneOn: await readCheckingPruneOn($),
           showAllWorktrees: await readShowAllWorktrees($),
         }
-        body.push(...(await panelsOfTab(view)))
+        const content = contentOfTab(view)
+        tabToolbar = content.toolbar
+        body.push(...content.panels)
       }
     }
-    return (
-      <Box flexDirection="column" backgroundColor={c.background} width="100%">
-        {header($, ui, snapshot, host, choices)}
-        {tabBar($, ui, tabBarView)}
-        <Box key="body" flexDirection="column" paddingX={1} paddingTop={1} rowGap={1}>
+    return forSurface(
+      ui,
+      <Box flexDirection="column" width="100%" paddingTop={1} rowGap={1}>
+        {header($, ui, navigationView)}
+        {divider(ui, 'navigation-divider', bodyColumns)}
+        {tabToolbar ? (
+          <Box key="tab-toolbar" flexDirection="column">
+            {tabToolbar}
+            {divider(ui, 'toolbar-divider', bodyColumns)}
+          </Box>
+        ) : null}
+        <Box key="body" flexDirection="column" paddingX={1} rowGap={isTerminal(ui) ? TERMINAL_SECTION_GAP : DESKTOP_SECTION_GAP}>
           {body}
         </Box>
         {footer(ui, isKeyboardOn)}
-      </Box>
+      </Box>,
     )
   })
 }

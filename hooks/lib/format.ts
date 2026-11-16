@@ -41,6 +41,13 @@ export function storageSize(kib: number | null): string {
   return `${Math.round(kib / KIB_PER_MIB)} MiB`
 }
 
+export function compactSize(kib: number | null): string {
+  if (!isKnown(kib)) return '?'
+  if (kib >= KIB_PER_TIB) return `${(kib / KIB_PER_TIB).toFixed(1)}T`
+  if (kib >= KIB_PER_GIB) return `${(kib / KIB_PER_GIB).toFixed(1)}G`
+  return `${Math.round(kib / KIB_PER_MIB)}M`
+}
+
 export const kibAsGib = (kib: number | null): string => (isKnown(kib) ? (kib / KIB_PER_GIB).toFixed(1) : '?')
 
 export const mibAsGib = (mib: number | null): string => ((mib ?? 0) / MIB_PER_GIB).toFixed(1)

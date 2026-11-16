@@ -9,7 +9,7 @@ export const PROCESS_SORTS: readonly ProcessSort[] = ['cpu', 'mem']
 export const DEFAULT_CHOICES: ConsoleChoices = {
   host: null,
   tab: 'overview',
-  range: 60,
+  range: 120,
   filter: 'all',
   sort: 'cpu',
 }

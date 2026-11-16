@@ -3,13 +3,15 @@ import { toggleConsole } from './console'
 import { percentText } from './format'
 import { isStale, percentLevel } from './health'
 import { BRAND } from './mod'
-import { TOKYO_NIGHT as c, GRADIENTS, type Gradient, levelColor } from './palette'
+import { TOKYO_NIGHT as c, GRADIENTS, type Gradient, gradientAt, levelColor } from './palette'
 import type { HostSnapshot, MonitorSettings, PercentLevel } from './schemas'
 import { readError, readIsConsoleOpen, readSnapshot } from './store'
-import { type Tree, type Ui, uiOf } from './ui/ui'
-import { joinWith, meter, SEPARATOR, type UiGlyphName, uiGlyph } from './ui/widgets'
+import { uiIcon } from './ui/icons'
+import { forSurface, type Tree, type Ui, uiOf } from './ui/ui'
+import { joinWith, meter, SEPARATOR, type UiGlyphName } from './ui/widgets'
 
 const READING_CELLS = 4
+const PERCENT_SCALE = 100
 const TOGGLE_HOTKEY = 'm'
 const TOGGLE_COLUMNS = 4
 const OVERFLOW_COLUMNS = 4
@@ -34,10 +36,11 @@ function reading(
 ): Tree {
   const { Box, Text } = ui.el
   const level = percentLevel(percent, settings)
+  const loadColor = gradientAt(gradient, (percent ?? 0) / PERCENT_SCALE)
   return (
-    <Box key={key} columnGap={1} flexShrink={0}>
-      <Text color={c.comment}>{uiGlyph(glyph)}</Text>
-      {meter(ui, `${key}-meter`, percent, READING_CELLS, gradient)}
+    <Box key={key} columnGap={1} flexShrink={0} alignItems="center">
+      {uiIcon(ui, glyph, loadColor)}
+      {meter(ui, `${key}-meter`, percent, READING_CELLS, gradient, c.terminalBlack)}
       <Text color={levelColor(level)}>{`${percentText(percent)}${LEVEL_MARKS[level]}`}</Text>
     </Box>
   )
@@ -47,21 +50,24 @@ function hostSegment(ui: Ui, host: HostSnapshot, settings: MonitorSettings): Tre
   const { Box, Text } = ui.el
   const key = `host-${host.label}`
   const label = (
-    <Text color={c.blue} bold>
-      {host.label}
-    </Text>
+    <Box columnGap={1} alignItems="center" flexShrink={0}>
+      {uiIcon(ui, 'server', c.blue)}
+      <Text color={c.blue} weight="semibold">
+        {host.label}
+      </Text>
+    </Box>
   )
   if (host.state !== 'ok') {
     const { mark, color } = UNREACHABLE_MARKS[host.state]
     return (
-      <Box key={key} columnGap={1} flexShrink={0}>
+      <Box key={key} columnGap={1} flexShrink={0} alignItems="center">
         {label}
         <Text color={color}>{mark}</Text>
       </Box>
     )
   }
   return (
-    <Box key={key} columnGap={1} flexShrink={0}>
+    <Box key={key} columnGap={1} flexShrink={0} alignItems="center">
       {label}
       {reading(ui, `${key}-cpu`, 'cpu', host.cpu_pct, GRADIENTS.cpu, settings)}
       {reading(ui, `${key}-mem`, 'memory-stick', host.mem_pct, GRADIENTS.memory, settings)}
@@ -71,7 +77,7 @@ function hostSegment(ui: Ui, host: HostSnapshot, settings: MonitorSettings): Tre
 }
 
 const segmentColumns = (host: HostSnapshot): number =>
-  host.label.length + 1 + (host.state === 'ok' ? 2 * (READING_COLUMNS + 1) + 2 : UNREACHABLE_MARKS[host.state].mark.length + 1)
+  host.label.length + 3 + (host.state === 'ok' ? 2 * (READING_COLUMNS + 1) + 2 : UNREACHABLE_MARKS[host.state].mark.length + 1)
 
 function hostsThatFit(hosts: HostSnapshot[], bodyColumns: number): HostSnapshot[] {
   let room = bodyColumns - TOGGLE_COLUMNS - OVERFLOW_COLUMNS - 2
@@ -100,17 +106,19 @@ export function wireBand(on: On): void {
       </Button>
     )
     const failedPoll = error ? (
-      <Text color={c.red} bold>
+      <Text color={c.red} weight="semibold">
         {FAILED_POLL_MARK}
       </Text>
     ) : null
-    const frame = (content: Tree[]): RenderElement => (
-      <Box columnGap={1} justifyContent="flex-end" width="100%" backgroundColor={c.backgroundDark}>
-        {content}
-        {divider()}
-        {toggle}
-      </Box>
-    )
+    const frame = (content: Tree[]): RenderElement =>
+      forSurface(
+        ui,
+        <Box columnGap={1} justifyContent="flex-end" alignItems="center" width="100%" paddingX={1}>
+          {content}
+          {divider()}
+          {toggle}
+        </Box>,
+      )
     if (!snapshot && error) return frame([<Text color={c.red}>{`${BRAND}: error`}</Text>, failedPoll])
     if (!snapshot) return frame([<Text color={c.comment}>{`${BRAND} …`}</Text>])
     if (snapshot.hosts.length === 0) return frame([<Text color={c.dim}>{`${BRAND}: add hosts`}</Text>])

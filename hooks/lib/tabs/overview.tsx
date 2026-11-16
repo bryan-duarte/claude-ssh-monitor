@@ -4,15 +4,18 @@ import { eventMarkers, SECONDS_PER_SAMPLE, samplesInRange } from '../history'
 import { TOKYO_NIGHT as c, GRADIENTS, type Gradient, levelColor } from '../palette'
 import type { ChartMarker, HostSnapshot, MonitorSettings, Sample } from '../schemas'
 import { historyChart, MAX_RASTER_COLUMNS, sparkline } from '../ui/charts'
+import { uiIcon } from '../ui/icons'
 import type { Tree, Ui } from '../ui/ui'
-import { coreBlocks, hostTitle, meter, panel, panelTitle, ROW_LABEL_COLUMNS, rowLabel, type UiGlyphName } from '../ui/widgets'
+import { coreBlocks, hostTitle, meter, panel, ROW_LABEL_COLUMNS, rowLabel, type UiGlyphName } from '../ui/widgets'
 import { worktreeFacts, worktreesOfHost } from '../worktrees'
 import type { TabView } from './view'
 
 const RESOURCE_METER_CELLS = 20
 const CHART_ROWS = 4
 const PANEL_CHROME_COLUMNS = 6
-const NESTED_PANEL_CHROME_COLUMNS = 4
+const MIN_METER_CELLS = 6
+const METRIC_LABEL_COLUMNS = 9
+const METRIC_READOUT_COLUMNS = 6
 const NET_SPARKLINE_SAMPLES = 40
 const NET_SPARKLINE_COLUMNS = 10
 const MIN_CHART_COLUMNS = 10
@@ -36,7 +39,7 @@ type MetricBoxProps = {
 function percentCell(ui: Ui, percent: number | null, settings: MonitorSettings): Tree {
   const { Text } = ui.el
   return (
-    <Text color={levelColor(percentLevel(percent, settings))} bold>
+    <Text color={levelColor(percentLevel(percent, settings))} weight="semibold">
       {percentText(percent)}
     </Text>
   )
@@ -90,20 +93,31 @@ function timeAxis(ui: Ui, rangeText: string): Tree {
   )
 }
 
-function metricBox(ui: Ui, props: MetricBoxProps): Tree {
+function metricSection(ui: Ui, props: MetricBoxProps): Tree {
   const { Box, Text } = ui.el
-  return panel(ui, {
-    key: props.key,
-    title: panelTitle(ui, props.glyph, props.label, props.gradient[0] ?? c.foreground),
-    children: [
-      meter(ui, `${props.key}-meter`, props.percent, RESOURCE_METER_CELLS, props.gradient),
-      <Box columnGap={1}>
+  const accent = props.gradient[0] ?? c.foreground
+  const meterCells = Math.max(
+    MIN_METER_CELLS,
+    Math.min(RESOURCE_METER_CELLS, props.columns - METRIC_LABEL_COLUMNS - METRIC_READOUT_COLUMNS),
+  )
+  return (
+    <Box key={props.key} flexDirection="column" paddingTop={1}>
+      <Box columnGap={1} alignItems="center">
+        <Box width={ROW_LABEL_COLUMNS} flexShrink={0} columnGap={1} alignItems="center">
+          {uiIcon(ui, props.glyph, accent)}
+          <Text color={accent} weight="semibold">
+            {props.label}
+          </Text>
+        </Box>
+        {meter(ui, `${props.key}-meter`, props.percent, meterCells, props.gradient, c.terminalBlack)}
         {percentCell(ui, props.percent, props.settings)}
+      </Box>
+      <Box paddingLeft={ROW_LABEL_COLUMNS + 1}>
         <Text color={c.dim} wrap="truncate-end">
           {props.detail}
         </Text>
-      </Box>,
-      historyChart(ui, {
+      </Box>
+      {historyChart(ui, {
         key: `${props.key}-chart`,
         samples: props.samples,
         dashed: props.dashed,
@@ -112,10 +126,10 @@ function metricBox(ui: Ui, props: MetricBoxProps): Tree {
         columns: props.columns,
         rows: CHART_ROWS,
         alt: `${props.label} history`,
-      }),
-      timeAxis(ui, props.rangeText),
-    ],
-  })
+      })}
+      {timeAxis(ui, props.rangeText)}
+    </Box>
+  )
 }
 
 function memoryDetail(host: HostSnapshot): string {
@@ -128,10 +142,10 @@ function hostCharts(view: TabView): Tree[] {
   const { ui, host, history, choices, snapshot } = view
   const series = history.hosts[host.label]
   const rangeText = minutesText(choices.range * SECONDS_PER_SAMPLE)
-  const roomColumns = view.columns - PANEL_CHROME_COLUMNS - NESTED_PANEL_CHROME_COLUMNS
+  const roomColumns = view.columns - PANEL_CHROME_COLUMNS
   const columns = Math.min(MAX_RASTER_COLUMNS, Math.max(MIN_CHART_COLUMNS, roomColumns))
   return [
-    metricBox(ui, {
+    metricSection(ui, {
       key: `cpu-box-${host.label}`,
       label: 'cpu',
       glyph: 'cpu',
@@ -144,7 +158,7 @@ function hostCharts(view: TabView): Tree[] {
       columns,
       settings: snapshot.settings,
     }),
-    metricBox(ui, {
+    metricSection(ui, {
       key: `mem-box-${host.label}`,
       label: 'mem',
       glyph: 'memory-stick',
@@ -212,7 +226,7 @@ function coresRow(view: TabView): Tree {
     host.cores.length > 0 ? (
       coreBlocks(ui, `cores-${host.label}-blocks`, host.cores, GRADIENTS.cpu)
     ) : (
-      <Text color={c.foreground} bold>
+      <Text color={c.foreground} weight="semibold">
         {String(coreCount)}
       </Text>
     )

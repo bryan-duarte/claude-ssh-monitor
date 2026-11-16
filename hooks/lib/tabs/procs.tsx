@@ -7,13 +7,17 @@ import type { Tree } from '../ui/ui'
 import {
   AGENT_MARKER,
   type ChoiceOption,
+  dropdown,
   fixedCell,
+  growCell,
+  iconLabel,
+  iconPicker,
+  isTerminal,
   killButton,
   meter,
   panel,
   panelTitle,
-  segmentedControl,
-  uiGlyph,
+  toolbar,
 } from '../ui/widgets'
 import type { TabView } from './view'
 
@@ -23,14 +27,17 @@ const CPU_METER_CELLS = 10
 const FIRST_KILLABLE_PID = 2
 const SORT_MARKER = '▾'
 const COLUMNS = { marker: 2, pid: 7, percent: 7, kill: 2 } as const
-const SORTS: Record<ProcessSort, { column: string; name: string; button: string }> = {
-  cpu: { column: 'cpu%', name: 'cpu', button: 'CPU' },
-  mem: { column: 'mem%', name: 'memory', button: 'MEM' },
+const PID_COLUMN_MIN_BODY = 60
+const SORTS: Record<ProcessSort, { column: string; name: string }> = {
+  cpu: { column: 'cpu%', name: 'cpu' },
+  mem: { column: 'mem%', name: 'memory' },
 }
 const SORT_OPTIONS: ChoiceOption<ProcessSort>[] = (['cpu', 'mem'] as const).map(sort => ({
   value: sort,
-  label: SORTS[sort].button,
+  label: SORTS[sort].name,
 }))
+
+const hasPidColumn = (view: TabView): boolean => view.columns >= PID_COLUMN_MIN_BODY
 
 const sortValue = (process: ProcessRow, sort: ProcessSort): number => (sort === 'mem' ? process.mem : process.cpu) ?? 0
 
@@ -38,6 +45,9 @@ function sortableHeader(view: TabView, sort: ProcessSort): Tree {
   const { Button, Text } = view.ui.el
   const isActive = view.choices.sort === sort
   const { column } = SORTS[sort]
+  const label = isActive ? `${column} ${SORT_MARKER}` : column
+  if (!isTerminal(view.ui))
+    return fixedCell(view.ui, COLUMNS.percent, <Text color={isActive ? c.blue : c.comment}>{label}</Text>, true)
   return fixedCell(
     view.ui,
     COLUMNS.percent,
@@ -54,10 +64,8 @@ function tableHeader(view: TabView): Tree {
   return (
     <Box key="procs-header" columnGap={1}>
       {fixedCell(ui, COLUMNS.marker, null)}
-      {fixedCell(ui, COLUMNS.pid, <Text color={c.comment}>pid</Text>, true)}
-      <Box flexGrow={1} flexShrink={1}>
-        <Text color={c.comment}>program</Text>
-      </Box>
+      {hasPidColumn(view) ? fixedCell(ui, COLUMNS.pid, <Text color={c.comment}>pid</Text>, true) : null}
+      {growCell(ui, <Text color={c.comment}>program</Text>)}
       {view.isWide ? fixedCell(ui, CPU_METER_CELLS, null) : null}
       {sortableHeader(view, 'cpu')}
       {sortableHeader(view, 'mem')}
@@ -93,10 +101,8 @@ function processRow(view: TabView, process: ProcessRow): Tree {
   return (
     <Box key={rowKey} columnGap={1}>
       {fixedCell(ui, COLUMNS.marker, processMarker(view, process))}
-      {fixedCell(ui, COLUMNS.pid, <Text color={c.comment}>{String(process.pid ?? '?')}</Text>, true)}
-      <Box flexGrow={1} flexShrink={1} overflow="hidden">
-        {programLabel(ui, `${rowKey}-name`, process.name, process.agent ? c.foreground : c.foregroundDark)}
-      </Box>
+      {hasPidColumn(view) ? fixedCell(ui, COLUMNS.pid, <Text color={c.comment}>{String(process.pid ?? '?')}</Text>, true) : null}
+      {growCell(ui, programLabel(ui, `${rowKey}-name`, process.name, process.agent ? c.foreground : c.foregroundDark))}
       {view.isWide ? meter(ui, `${rowKey}-meter`, Math.min(cpu, PERCENT_SCALE), CPU_METER_CELLS, GRADIENTS.cpu) : null}
       {fixedCell(ui, COLUMNS.percent, <Text color={cpuColor}>{cpu.toFixed(1)}</Text>, true)}
       {fixedCell(ui, COLUMNS.percent, <Text color={gradientAt(GRADIENTS.memory, memoryShare)}>{memory.toFixed(1)}</Text>, true)}
@@ -105,27 +111,45 @@ function processRow(view: TabView, process: ProcessRow): Tree {
   )
 }
 
-export function procsPanels(view: TabView): Tree[] {
-  const { ui, host, snapshot, choices } = view
-  const { Box, Text } = ui.el
-  const topProcesses = [...host.processes]
-    .sort((first, second) => sortValue(second, choices.sort) - sortValue(first, choices.sort))
-    .slice(0, snapshot.settings.top_n)
-  return [
-    <Box key="procs-sort" justifyContent="flex-end" columnGap={1}>
-      <Text color={c.comment}>{`${uiGlyph('arrow-down-wide-narrow')} sort`}</Text>
-      {segmentedControl(ui, { key: 'sort', options: SORT_OPTIONS, selected: choices.sort, onSelect: view.act.sortBy })}
-    </Box>,
-    panel(ui, {
-      key: `procs-${host.label}`,
-      title: (
-        <Text>
-          {panelTitle(ui, 'activity', 'procs', c.magenta)}
-          <Text color={c.comment}>{` top ${topProcesses.length}`}</Text>
-        </Text>
-      ),
-      rightTitle: <Text color={c.comment}>{`by ${choices.sort === 'mem' ? 'memory' : 'cpu'}`}</Text>,
-      children: [tableHeader(view), ...topProcesses.map(process => processRow(view, process))],
+function topProcesses(view: TabView): ProcessRow[] {
+  return [...view.host.processes]
+    .sort((first, second) => sortValue(second, view.choices.sort) - sortValue(first, view.choices.sort))
+    .slice(0, view.snapshot.settings.top_n)
+}
+
+function sortPicker(view: TabView): Tree {
+  return iconPicker(
+    view.ui,
+    'arrow-down-wide-narrow',
+    dropdown(view.ui, {
+      key: 'sort',
+      label: 'sort by',
+      options: SORT_OPTIONS,
+      selected: view.choices.sort,
+      onSelect: view.act.sortBy,
     }),
-  ]
+  )
+}
+
+export function procsToolbar(view: TabView): Tree {
+  if (!isTerminal(view.ui)) return null
+  return toolbar(
+    view.ui,
+    'procs-toolbar',
+    [iconLabel(view.ui, 'activity', `top ${topProcesses(view).length} processes`, c.magenta)],
+    [sortPicker(view)],
+  )
+}
+
+export function procsPanel(view: TabView): Tree {
+  const { ui, host, choices } = view
+  const { Text } = ui.el
+  const processes = topProcesses(view)
+  return panel(ui, {
+    key: `procs-${host.label}`,
+    title: panelTitle(ui, 'activity', 'procs', c.magenta),
+    rightTitle: <Text color={c.comment}>{`top ${processes.length} · by ${SORTS[choices.sort].name}`}</Text>,
+    actions: isTerminal(ui) ? undefined : sortPicker(view),
+    children: [tableHeader(view), ...processes.map(process => processRow(view, process))],
+  })
 }

@@ -1,4 +1,4 @@
-import { ageOrUnknown, homeRelative, minutesText, storageSize } from '../format'
+import { ageOrUnknown, compactSize, homeRelative, minutesText, storageSize } from '../format'
 import { percentLevel } from '../health'
 import { AGENT_HISTORY_SAMPLES, SECONDS_PER_SAMPLE, samplesInRange } from '../history'
 import { TOKYO_NIGHT as c, GRADIENTS, gradientAt, levelColor } from '../palette'
@@ -14,8 +14,8 @@ const KILL_COLUMNS = 2
 const SPARKLINE_COLUMNS = 16
 const SPARKLINE_TITLE = `cpu ${minutesText(AGENT_HISTORY_SAMPLES * SECONDS_PER_SAMPLE)}`
 const COLUMNS = {
-  wide: { app: 14, state: 11, cpu: 6, memory: 7, uptime: 5 },
-  narrow: { app: 2, state: 1, cpu: 5, memory: 6, uptime: 4 },
+  wide: { app: 14, state: 11, cpu: 6, memory: 9, uptime: 5 },
+  narrow: { app: 2, state: 1, cpu: 4, memory: 6, uptime: 4 },
 } as const
 
 const AGENT_STATE_LOOKS: Record<AgentState, { label: string; color: string }> = {
@@ -83,17 +83,24 @@ function agentRow(view: TabView, agent: AgentView, hasSparkline: boolean): Tree 
     <Box key={`agent-${host.label}-${process.pid}`} columnGap={1}>
       {fixedCell(ui, widths.app, agentLabel(ui, `agent-app-${host.label}-${process.pid}`, process.app, view.isWide))}
       {stateCell(view, agent.state)}
-      <Box flexGrow={1} flexShrink={1} columnGap={1} overflow="hidden">
-        <Text color={c.blue} wrap="truncate-end">
-          {process.repository || ''}
-        </Text>
+      <Box flexGrow={1} flexShrink={1} minWidth={0} columnGap={1} overflow="hidden">
+        {view.isWide ? (
+          <Text color={c.blue} wrap="truncate-end">
+            {process.repository || ''}
+          </Text>
+        ) : null}
         <Text color={c.foregroundDark} wrap="truncate-end">
           {process.branch || folder}
         </Text>
       </Box>
       {hasSparkline ? fixedCell(ui, SPARKLINE_COLUMNS, cpuSparkline(view, agent)) : null}
       {fixedCell(ui, widths.cpu, <Text color={cpuColor}>{cpu.toFixed(1)}</Text>, true)}
-      {fixedCell(ui, widths.memory, <Text color={c.foregroundDark}>{storageSize(process.tree_rss_kb)}</Text>, true)}
+      {fixedCell(
+        ui,
+        widths.memory,
+        <Text color={c.foregroundDark}>{view.isWide ? storageSize(process.tree_rss_kb) : compactSize(process.tree_rss_kb)}</Text>,
+        true,
+      )}
       {fixedCell(ui, widths.uptime, <Text color={c.comment}>{ageOrUnknown(process.elapsed_seconds)}</Text>, true)}
       {killCell(view, process)}
     </Box>
@@ -109,7 +116,7 @@ function tableHeader(view: TabView, hasSparkline: boolean): Tree {
     <Box key="agents-header" columnGap={1}>
       {fixedCell(ui, widths.app, view.isWide ? heading('agent') : null)}
       {fixedCell(ui, widths.state, view.isWide ? heading('state') : null)}
-      <Box flexGrow={1} flexShrink={1}>
+      <Box flexGrow={1} flexShrink={1} minWidth={0}>
         {heading('branch')}
       </Box>
       {hasSparkline ? fixedCell(ui, SPARKLINE_COLUMNS, heading(SPARKLINE_TITLE)) : null}

@@ -1,49 +1,23 @@
 import { TOKYO_NIGHT as c, type Gradient, gradientAt } from '../palette'
+import { type UiGlyphName, uiGlyph } from './glyphs'
+import { uiIcon } from './icons'
 import type { Tree, Ui } from './ui'
+
+export { type UiGlyphName, uiGlyph } from './glyphs'
 
 const PERCENT_SCALE = 100
 const FILLED_CELL = '▮'
 const EMPTY_CELL = '▯'
+const DIVIDER_CELL = '─'
+const DESKTOP_DIVIDER_OVERDRAW = 3
 const SUPERSCRIPT_DIGITS = ['⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'] as const
 export const ROW_LABEL_COLUMNS = 8
 export const AGENT_MARKER = '●'
 export const SEPARATOR = '│'
+export const TITLE_SIZE = 'footnote'
+const ROW_ACTION_MARK = '›'
 
-const UI_GLYPHS = {
-  gauge: '◔',
-  bot: '◉',
-  plug: '⏚',
-  'folder-git-2': '⎇',
-  container: '⬡',
-  activity: '∿',
-  cpu: '▣',
-  'memory-stick': '▤',
-  'hard-drive': '▭',
-  'arrow-down-up': '⇅',
-  'git-branch': '⎇',
-  microchip: '▦',
-  server: '▣',
-  history: '↺',
-  pin: '⊙',
-  'external-link': '↗',
-  square: '■',
-  'trash-2': '⌫',
-  'square-x': '⊠',
-  'triangle-alert': '⚠',
-  keyboard: '⌨',
-  archive: '▤',
-  layers: '≡',
-  'git-merge': '⑂',
-  'file-diff': '±',
-  'arrow-down-to-line': '⤓',
-  'arrow-down-wide-narrow': '⇣',
-  check: '✓',
-  close: '✕',
-} as const
-
-export type UiGlyphName = keyof typeof UI_GLYPHS
-
-export const uiGlyph = (name: UiGlyphName): string => UI_GLYPHS[name]
+export const isTerminal = (ui: Ui): boolean => ui.surface === 'terminal'
 
 const superscript = (number: number): string =>
   String(number)
@@ -57,22 +31,28 @@ function filledCellCount(percent: number | null, cellCount: number): number {
   return Math.max(1, Math.round((Math.min(percent, PERCENT_SCALE) / PERCENT_SCALE) * cellCount))
 }
 
-export function meter(ui: Ui, key: string, percent: number | null, cellCount: number, gradient: Gradient): Tree {
-  const { Text } = ui.el
+export function meter(
+  ui: Ui,
+  key: string,
+  percent: number | null,
+  cellCount: number,
+  gradient: Gradient,
+  emptyColor: string = c.highlight,
+): Tree {
+  const { Box, Text } = ui.el
   const filledCells = filledCellCount(percent, cellCount)
   const lastCellIndex = Math.max(1, cellCount - 1)
   const cells = Array.from({ length: cellCount }, (_unused, index) => {
     const isFilled = index < filledCells
     return (
-      <Text color={isFilled ? gradientAt(gradient, index / lastCellIndex) : c.highlight}>
+      <Text color={isFilled ? gradientAt(gradient, index / lastCellIndex) : emptyColor}>
         {isFilled ? FILLED_CELL : EMPTY_CELL}
       </Text>
     )
   })
-  const { Box } = ui.el
   return (
     <Box key={key} flexShrink={0}>
-      {cells}
+      <Text>{cells}</Text>
     </Box>
   )
 }
@@ -88,8 +68,8 @@ export function coreBlocks(ui: Ui, key: string, cores: (number | null)[], gradie
     )
   })
   return (
-    <Box key={key} flexWrap="wrap">
-      {blocks}
+    <Box key={key} flexShrink={1} minWidth={0}>
+      <Text wrap="wrap">{blocks}</Text>
     </Box>
   )
 }
@@ -98,15 +78,15 @@ type PanelProps = {
   key: string
   title: Tree
   rightTitle?: Tree
+  actions?: Tree
   borderColor?: string
   children: Tree[]
 }
 
-export function panel(ui: Ui, props: PanelProps): Tree {
+function terminalPanel(ui: Ui, props: PanelProps, borderColor: string): Tree {
   const { Box, Text } = ui.el
-  const borderColor = props.borderColor ?? c.border
   return (
-    <Box key={props.key} flexDirection="column" borderStyle="round" borderColor={borderColor} paddingX={1} rowGap={0}>
+    <Box key={props.key} flexDirection="column" borderStyle="round" borderColor={borderColor} paddingX={1}>
       <Box position="absolute" top={-1} left={1}>
         <Text> </Text>
         {props.title}
@@ -124,39 +104,125 @@ export function panel(ui: Ui, props: PanelProps): Tree {
   )
 }
 
-export function panelTitle(ui: Ui, glyph: UiGlyphName, label: string, color: string): Tree {
-  const { Text } = ui.el
-  return <Text color={color} bold>{`${uiGlyph(glyph)} ${label}`}</Text>
+function sectionPanel(ui: Ui, props: PanelProps): Tree {
+  const { Box } = ui.el
+  const headerRight = props.actions ?? props.rightTitle
+  const subtitle = props.actions ? props.rightTitle : null
+  return (
+    <Box key={props.key} flexDirection="column">
+      <Box justifyContent="space-between" alignItems="flex-start" columnGap={2}>
+        <Box flexShrink={0}>{props.title}</Box>
+        {!props.actions && headerRight ? (
+          <Box flexShrink={1} minWidth={0} overflow="hidden" justifyContent="flex-end">
+            {truncated(headerRight)}
+          </Box>
+        ) : null}
+      </Box>
+      {props.actions ? (
+        <Box justifyContent="space-between" alignItems="flex-start" columnGap={2}>
+          <Box flexShrink={1} minWidth={0} overflow="hidden">
+            {subtitle ? truncated(subtitle) : null}
+          </Box>
+          <Box flexShrink={0}>{props.actions}</Box>
+        </Box>
+      ) : null}
+      <Box flexDirection="column" paddingTop={1}>
+        {props.children}
+      </Box>
+    </Box>
+  )
+}
+
+export function panel(ui: Ui, props: PanelProps): Tree {
+  if (isTerminal(ui)) return terminalPanel(ui, props, props.borderColor ?? c.border)
+  return sectionPanel(ui, props)
+}
+
+export function panelTitle(ui: Ui, glyph: UiGlyphName, label: string, color: string, detail?: string): Tree {
+  const { Box, Text } = ui.el
+  return (
+    <Box columnGap={1} alignItems="center" flexShrink={0}>
+      {uiIcon(ui, glyph, color)}
+      <Text color={color} weight="semibold" size={TITLE_SIZE}>
+        {label}
+      </Text>
+      {detail ? <Text color={c.comment}>{detail}</Text> : null}
+    </Box>
+  )
 }
 
 export function hostTitle(ui: Ui, label: string, number: number, color: string): Tree {
-  const { Text } = ui.el
+  const { Box, Text } = ui.el
   return (
-    <Text>
-      <Text color={c.comment}>{superscript(number)}</Text>
-      <Text color={color}>{` ${uiGlyph('server')} `}</Text>
-      <Text color={color} bold>
+    <Box columnGap={1} alignItems="center" flexShrink={0}>
+      {uiIcon(ui, 'server', color)}
+      <Text color={color} weight="semibold" size={TITLE_SIZE}>
         {label}
       </Text>
-    </Text>
+      <Text color={c.comment}>{superscript(number)}</Text>
+    </Box>
   )
 }
 
 export function rowLabel(ui: Ui, label: string, glyph: UiGlyphName): Tree {
   const { Box, Text } = ui.el
   return (
-    <Box width={ROW_LABEL_COLUMNS} flexShrink={0}>
-      <Text color={c.comment}>{`${uiGlyph(glyph)} ${label}`}</Text>
+    <Box width={ROW_LABEL_COLUMNS} flexShrink={0} columnGap={1} alignItems="center">
+      {uiIcon(ui, glyph, c.comment)}
+      <Text color={c.comment}>{label}</Text>
     </Box>
   )
+}
+
+function truncated(content: Tree): Tree {
+  if (!content || typeof content !== 'object' || content.type !== 'Text') return content
+  return { ...content, props: { wrap: 'truncate-end', ...content.props } } as Tree
 }
 
 export function fixedCell(ui: Ui, columns: number, content: Tree, isRightAligned = false): Tree {
   const { Box } = ui.el
   return (
     <Box width={columns} flexShrink={0} justifyContent={isRightAligned ? 'flex-end' : 'flex-start'} overflow="hidden">
-      {content}
+      {truncated(content)}
     </Box>
+  )
+}
+
+export function growCell(ui: Ui, content: Tree): Tree {
+  const { Box } = ui.el
+  return (
+    <Box flexGrow={1} flexShrink={1} minWidth={0} columnGap={1} overflow="hidden">
+      {truncated(content)}
+    </Box>
+  )
+}
+
+export function iconLabel(ui: Ui, glyph: UiGlyphName, label: string, iconColor: string, labelColor: string = c.comment): Tree {
+  const { Box, Text } = ui.el
+  return (
+    <Box columnGap={1} alignItems="center" flexShrink={0}>
+      {uiIcon(ui, glyph, iconColor)}
+      <Text color={labelColor}>{label}</Text>
+    </Box>
+  )
+}
+
+export function iconPicker(ui: Ui, glyph: UiGlyphName, picker: Tree, isCentered = false): Tree {
+  const { Box } = ui.el
+  return (
+    <Box columnGap={1} alignItems={isCentered ? 'center' : 'flex-start'} flexShrink={0}>
+      {uiIcon(ui, glyph, c.blue)}
+      {picker}
+    </Box>
+  )
+}
+
+export function glyphButton(ui: Ui, key: string, glyph: UiGlyphName, label: string, color: string, onPress: () => void): Tree {
+  const { Button, Text } = ui.el
+  return (
+    <Button key={key} plain onPress={onPress}>
+      <Text color={color}>{`${uiGlyph(glyph)} ${label}`}</Text>
+    </Button>
   )
 }
 
@@ -168,96 +234,101 @@ export function keycap(ui: Ui, label: string, isLive: boolean): Tree {
 export type ChoiceOption<T extends string | number> = {
   value: T
   label: string
-  glyph?: string
   count?: number | null
   dotColor?: string
 }
 
-type TabStripProps<T extends string> = {
+type ChoiceProps<T extends string | number> = {
   key: string
   options: ChoiceOption<T>[]
   selected: T
-  isCompact: boolean
   onSelect: (value: T) => void
 }
 
-export function tabStrip<T extends string>(ui: Ui, props: TabStripProps<T>): Tree {
+const hasCount = (count: number | null | undefined): count is number =>
+  count !== undefined && count !== null && Number.isFinite(count)
+
+export function tabStrip<T extends string>(ui: Ui, props: ChoiceProps<T>): Tree {
   const { Box, Button, Text } = ui.el
   const tabs = props.options.map(option => {
     const isSelected = option.value === props.selected
-    const showLabel = isSelected || !props.isCompact || !option.glyph
     const background = isSelected ? c.highlight : undefined
-    const textColor = isSelected ? c.foreground : c.dim
-    const hasCount = option.count !== undefined && option.count !== null && Number.isFinite(option.count)
     return (
       <Button key={`${props.key}-${option.value}`} plain onPress={() => props.onSelect(option.value)}>
         <Text backgroundColor={background}> </Text>
         {option.dotColor ? <Text color={option.dotColor} backgroundColor={background}>{`${AGENT_MARKER} `}</Text> : null}
-        {option.glyph ? <Text color={textColor} backgroundColor={background}>{`${option.glyph} `}</Text> : null}
-        {showLabel ? (
-          <Text color={textColor} backgroundColor={background}>
-            {option.label}
-          </Text>
-        ) : null}
-        {hasCount ? <Text color={c.comment} backgroundColor={background}>{` ${option.count}`}</Text> : null}
+        <Text color={isSelected ? c.foreground : c.dim} backgroundColor={background} weight={isSelected ? 'semibold' : 'regular'}>
+          {option.label}
+        </Text>
+        {hasCount(option.count) ? <Text color={c.comment} backgroundColor={background}>{` ${option.count}`}</Text> : null}
         <Text backgroundColor={background}> </Text>
       </Button>
     )
   })
   return (
-    <Box key={props.key} flexWrap="wrap">
+    <Box key={props.key} columnGap={1} flexWrap="wrap">
       {tabs}
     </Box>
   )
 }
 
-type SegmentedProps<T extends string | number> = {
-  key: string
-  options: ChoiceOption<T>[]
-  selected: T
-  onSelect: (value: T) => void
+const choiceLabel = (option: ChoiceOption<string | number>): string =>
+  hasCount(option.count) ? `${option.label} (${option.count})` : option.label
+
+const DROPDOWN_CHROME_COLUMNS = 3
+
+type DropdownProps<T extends string | number> = ChoiceProps<T> & { label?: string; color?: string; isNative?: boolean }
+
+export function dropdown<T extends string | number>(ui: Ui, props: DropdownProps<T>): Tree {
+  const options = props.options.map(option => ({ value: String(option.value), label: choiceLabel(option) }))
+  if (!props.isNative && (ui.surface === 'terminal' || ui.surface === 'desktop')) {
+    const { Client } = ui.el
+    const widest = Math.max(...options.map(option => option.label.length))
+    return (
+      <Client
+        key={props.key}
+        module="../../client/dropdown.tsx"
+        props={{ options, value: String(props.selected), color: props.color ?? c.foreground }}
+        width={widest + DROPDOWN_CHROME_COLUMNS}
+      />
+    )
+  }
+  const { Select } = ui.el
+  const optionValueOf = new Map(props.options.map(option => [String(option.value), option.value]))
+  return (
+    <Select
+      key={props.key}
+      label={props.label}
+      options={options}
+      value={String(props.selected)}
+      onSelect={value => {
+        const picked = optionValueOf.get(value)
+        if (picked !== undefined) props.onSelect(picked)
+      }}
+    />
+  )
 }
 
-export function segmentedControl<T extends string | number>(ui: Ui, props: SegmentedProps<T>): Tree {
-  const { Box, Button, Text } = ui.el
-  const segments = props.options.map(option => {
-    const isSelected = option.value === props.selected
-    return (
-      <Button key={`${props.key}-${option.value}`} plain onPress={() => props.onSelect(option.value)}>
-        <Text
-          color={isSelected ? c.background : c.dim}
-          backgroundColor={isSelected ? c.blue : c.backgroundDark}
-          bold={isSelected}
-        >
-          {` ${option.label} `}
-        </Text>
-      </Button>
-    )
-  })
+export function toolbar(ui: Ui, key: string, left: Tree[], right: Tree[]): Tree {
+  const { Box } = ui.el
   return (
-    <Box key={props.key} flexShrink={0}>
-      {segments}
+    <Box key={key} paddingX={1} columnGap={2} justifyContent="space-between" alignItems="center" flexWrap="wrap">
+      <Box columnGap={2} alignItems="center" flexWrap="wrap">
+        {left}
+      </Box>
+      <Box columnGap={2} alignItems="center">
+        {right}
+      </Box>
     </Box>
   )
 }
 
-export function filterChips<T extends string>(ui: Ui, props: SegmentedProps<T>): Tree {
-  const { Box, Button, Text } = ui.el
-  const chips = props.options.map(option => {
-    const isSelected = option.value === props.selected
-    const count = option.count !== undefined && option.count !== null ? ` ${option.count}` : ''
-    const glyph = option.glyph ? `${option.glyph} ` : ''
-    return (
-      <Button key={`${props.key}-${option.value}`} plain onPress={() => props.onSelect(option.value)}>
-        <Text color={isSelected ? c.background : c.dim} backgroundColor={isSelected ? c.blue : c.backgroundDark}>
-          {` ${glyph}${option.label}${count} `}
-        </Text>
-      </Button>
-    )
-  })
+export function divider(ui: Ui, key: string, columns: number): Tree {
+  const { Box, Text } = ui.el
+  const lineCells = isTerminal(ui) ? columns : columns * DESKTOP_DIVIDER_OVERDRAW
   return (
-    <Box key={props.key} flexWrap="wrap" columnGap={1}>
-      {chips}
+    <Box key={key} height={1} overflow="hidden">
+      <Text color={c.border}>{DIVIDER_CELL.repeat(Math.max(1, lineCells))}</Text>
     </Box>
   )
 }
@@ -272,6 +343,14 @@ type RowButtonProps = {
 
 export function rowButton(ui: Ui, props: RowButtonProps): Tree {
   const { Button, Text } = ui.el
+  if (!isTerminal(ui)) {
+    if (props.isDisabled) return null
+    return (
+      <Button key={props.key} plain onPress={props.onPress}>
+        <Text>{ROW_ACTION_MARK}</Text>
+      </Button>
+    )
+  }
   if (props.isDisabled) return <Text color={c.terminalBlack}>{uiGlyph(props.glyph)}</Text>
   return (
     <Button key={props.key} plain onPress={props.onPress}>

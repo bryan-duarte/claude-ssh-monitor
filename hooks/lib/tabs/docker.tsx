@@ -4,7 +4,7 @@ import { age, ageSince, storageSize } from '../format'
 import { TOKYO_NIGHT as c } from '../palette'
 import type { DockerContainer, HostDocker } from '../schemas'
 import type { Tree } from '../ui/ui'
-import { fixedCell, panel, panelTitle, rowButton, textButton } from '../ui/widgets'
+import { fixedCell, glyphButton, growCell, iconLabel, isTerminal, panel, panelTitle, rowButton, toolbar } from '../ui/widgets'
 import type { TabView } from './view'
 
 const RUNNING_DOT = '●'
@@ -15,8 +15,7 @@ const COLUMNS = {
   age: 5,
   size: 8,
   action: 2,
-  wide: { name: 18 },
-  narrow: { name: 12 },
+  name: 18,
 } as const
 
 type Notice = { color: string; message: string }
@@ -30,50 +29,37 @@ function containerAction(view: TabView, container: DockerContainer): Tree {
   })
 }
 
-function containerRow(view: TabView, container: DockerContainer): Tree {
+function containerRow(view: TabView, container: DockerContainer, hasSizes: boolean): Tree {
   const { ui } = view
   const { Box, Text } = ui.el
   const isRunning = isRunningContainer(container)
-  const nameColumns = view.isWide ? COLUMNS.wide.name : COLUMNS.narrow.name
   const createdAge = container.created_at === null ? '?' : ageSince(container.created_at).replace(' ago', '')
+  const nameText = <Text color={c.foreground}>{container.name}</Text>
   return (
     <Box key={`docker-${container.id}`} columnGap={1}>
       {fixedCell(ui, COLUMNS.dot, <Text color={isRunning ? c.green : c.comment}>{isRunning ? RUNNING_DOT : STOPPED_DOT}</Text>)}
-      {fixedCell(
-        ui,
-        nameColumns,
-        <Text color={c.foreground} wrap="truncate-end">
-          {container.name}
-        </Text>,
-      )}
-      <Box flexGrow={1} flexShrink={1} overflow="hidden">
-        <Text color={c.foregroundDark} wrap="truncate-end">
-          {container.image}
-        </Text>
-      </Box>
+      {view.isWide ? fixedCell(ui, COLUMNS.name, nameText) : growCell(ui, nameText)}
+      {view.isWide ? growCell(ui, <Text color={c.foregroundDark}>{container.image}</Text>) : null}
       {fixedCell(ui, COLUMNS.state, <Text color={isRunning ? c.green : c.comment}>{container.state}</Text>)}
-      {fixedCell(ui, COLUMNS.age, <Text color={c.comment}>{createdAge}</Text>, true)}
-      {fixedCell(ui, COLUMNS.size, <Text color={c.comment}>{storageSize(container.size_kb)}</Text>, true)}
+      {view.isWide ? fixedCell(ui, COLUMNS.age, <Text color={c.comment}>{createdAge}</Text>, true) : null}
+      {hasSizes ? fixedCell(ui, COLUMNS.size, <Text color={c.comment}>{storageSize(container.size_kb)}</Text>, true) : null}
       {fixedCell(ui, COLUMNS.action, containerAction(view, container), true)}
     </Box>
   )
 }
 
-function columnHeader(view: TabView): Tree {
+function columnHeader(view: TabView, hasSizes: boolean): Tree {
   const { ui } = view
   const { Box, Text } = ui.el
-  const nameColumns = view.isWide ? COLUMNS.wide.name : COLUMNS.narrow.name
   const heading = (label: string): Tree => <Text color={c.comment}>{label}</Text>
   return (
     <Box key="docker-header" columnGap={1}>
       {fixedCell(ui, COLUMNS.dot, null)}
-      {fixedCell(ui, nameColumns, heading('name'))}
-      <Box flexGrow={1} flexShrink={1}>
-        {heading('image')}
-      </Box>
+      {view.isWide ? fixedCell(ui, COLUMNS.name, heading('name')) : growCell(ui, heading('name'))}
+      {view.isWide ? growCell(ui, heading('image')) : null}
       {fixedCell(ui, COLUMNS.state, heading('state'))}
-      {fixedCell(ui, COLUMNS.age, heading('age'), true)}
-      {fixedCell(ui, COLUMNS.size, heading('size'), true)}
+      {view.isWide ? fixedCell(ui, COLUMNS.age, heading('age'), true) : null}
+      {hasSizes ? fixedCell(ui, COLUMNS.size, heading('size'), true) : null}
       {fixedCell(ui, COLUMNS.action, null)}
     </Box>
   )
@@ -118,32 +104,32 @@ function pruneButton(view: TabView, docker: HostDocker): Tree {
     return <Text color={c.comment}>{isCheckingHere ? 'checking…' : `prune ${storageSize(docker.reclaimable_kb)}`}</Text>
   }
   const label = `prune ${storageSize(docker.reclaimable_kb)}`
-  return textButton(view.ui, `docker-prune-${view.host.label}`, `[ ${label} ]`, c.foregroundDark, view.act.prune)
+  return glyphButton(view.ui, `docker-prune-${view.host.label}`, 'trash-2', label, c.orange, view.act.prune)
 }
 
 function dockerTitle(view: TabView, docker: HostDocker | null): Tree {
-  const { Text } = view.ui.el
-  return (
-    <Text>
-      {panelTitle(view.ui, 'container', 'docker', c.blue)}
-      {docker ? <Text color={c.foreground}>{` ${storageSize(docker.total_kb)}`}</Text> : null}
-      {docker ? <Text color={c.comment}>{` · ${storageSize(docker.reclaimable_kb)} can be freed`}</Text> : null}
-    </Text>
-  )
+  return panelTitle(view.ui, 'container', 'docker', c.blue, docker ? storageSize(docker.total_kb) : undefined)
 }
 
-function containersTitle(view: TabView, docker: HostDocker): Tree {
-  const { Text } = view.ui.el
+export function dockerToolbar(view: TabView): Tree {
+  if (!isTerminal(view.ui)) return null
+  const docker = dockerOfHost(view.docker, view.host)
+  if (docker.containers.length + docker.images.length + docker.volumes.length === 0) return null
   const runningCount = docker.containers.filter(isRunningContainer).length
-  const stoppedCount = docker.containers.length - runningCount
-  return <Text color={c.comment}>{`${runningCount} running · ${stoppedCount} stopped`}</Text>
+  return toolbar(
+    view.ui,
+    'docker-toolbar',
+    [iconLabel(view.ui, 'container', `${runningCount} running of ${docker.containers.length}`, c.blue)],
+    [pruneButton(view, docker)],
+  )
 }
 
 export function dockerPanel(view: TabView): Tree {
   const { ui, host, snapshot } = view
-  const { Box, Text } = ui.el
+  const { Text } = ui.el
   const docker = dockerOfHost(view.docker, host)
   const notice = stateNotice(view, docker)
+  const hasSizes = docker.containers.some(container => (container.size_kb ?? 0) > 0)
   const hasLists = docker.containers.length + docker.images.length + docker.volumes.length > 0
   const statusLine = notice ? <Text color={notice.color}>{notice.message}</Text> : null
   if (!hasLists) {
@@ -155,20 +141,24 @@ export function dockerPanel(view: TabView): Tree {
   }
   const containers =
     docker.containers.length > 0
-      ? [columnHeader(view), ...sortedContainers(docker.containers).map(container => containerRow(view, container))]
+      ? [
+          columnHeader(view, hasSizes),
+          ...sortedContainers(docker.containers).map(container => containerRow(view, container, hasSizes)),
+        ]
       : [<Text color={c.comment}>No containers.</Text>]
   return panel(ui, {
     key: `docker-${host.label}`,
     title: dockerTitle(view, docker),
-    rightTitle: containersTitle(view, docker),
+    rightTitle: (
+      <Text color={c.comment}>
+        {isTerminal(ui)
+          ? ageSince(docker.measured_at)
+          : `${docker.containers.filter(isRunningContainer).length} running of ${docker.containers.length} · measured ${ageSince(docker.measured_at)}`}
+      </Text>
+    ),
+    actions: isTerminal(ui) ? undefined : pruneButton(view, docker),
     children: [
       statusLine,
-      <Box key="docker-tools" justifyContent="space-between" columnGap={1}>
-        <Text
-          color={c.comment}
-        >{`containers · ${docker.containers.filter(isRunningContainer).length} running of ${docker.containers.length}`}</Text>
-        {pruneButton(view, docker)}
-      </Box>,
       ...containers,
       <Text color={c.comment}>{storageLine(docker)}</Text>,
       <Text
