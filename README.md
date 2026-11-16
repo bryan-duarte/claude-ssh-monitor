@@ -13,19 +13,22 @@ A btop-style monitor of the SSH hosts where your coding agents run, drawn inside
 At the prompt of a terminal session:
 
 ```
-/plugin install ssh-monitor --marketplace bryan-duarte/ssh-monitor
+/plugin install ssh-monitor --marketplace bryan-duarte/claude-ssh-monitor
 ```
+
+In the desktop app, where `/plugin` does not run: click + next to the prompt box, then Plugins, Add marketplace with `bryan-duarte/claude-ssh-monitor`, then Add plugin.
 
 From a shell:
 
 ```bash
-claude plugin install ssh-monitor --marketplace bryan-duarte/ssh-monitor
+claude plugin install ssh-monitor --marketplace bryan-duarte/claude-ssh-monitor
 ```
 
-For development, load the folder directly:
+For development, clone the repository and load the folder directly:
 
 ```bash
-claude --plugin-dir ~/Documents/proyectos/personales/ssh-monitor
+git clone https://github.com/bryan-duarte/claude-ssh-monitor.git
+claude --plugin-dir ./claude-ssh-monitor
 ```
 
 ## Setup
