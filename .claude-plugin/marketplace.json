@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "ssh-monitor",
+  "owner": {
+    "name": "bryan-duarte"
+  },
+  "description": "A btop-style monitor of the SSH hosts where your coding agents run.",
+  "plugins": [
+    {
+      "name": "ssh-monitor",
+      "source": "./",
+      "description": "SSH host monitor for coding agents"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "name": "ssh-monitor",
+  "version": "0.1.0",
+  "description": "A btop-style monitor of the SSH hosts where your coding agents run: CPU, memory, agents, ports, worktrees and Docker",
+  "author": { "name": "bryan-duarte" },
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}

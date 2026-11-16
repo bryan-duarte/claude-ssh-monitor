@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -u
+
+HERDWATCH_ROOT="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
+
+for library in state problems config record lock ssh pins collect alerts worktrees docker snapshot tunnels actions; do
+  # shellcheck source=/dev/null
+  . "$HERDWATCH_ROOT/lib/$library.sh"
+done
+
+herdwatch_usage() {
+  echo "usage: ssh-monitor {snapshot [--cached]|worktrees|docker}" >&2
+  echo "       ssh-monitor action {${ACTION_NAMES// /|}} <label> [args...]" >&2
+}
+
+herdwatch_main() {
+  case "${1:-}" in
+    snapshot)
+      herdwatch_resolve_dirs || exit 1
+      if [ "${2:-}" = "--cached" ]; then
+        herdwatch_cached_snapshot
+      else
+        herdwatch_snapshot
+      fi
+      ;;
+    worktrees)
+      herdwatch_resolve_dirs || exit 1
+      herdwatch_measure_worktrees
+      ;;
+    docker)
+      herdwatch_resolve_dirs || exit 1
+      herdwatch_measure_docker
+      ;;
+    action)
+      herdwatch_resolve_dirs || exit 1
+      shift
+      herdwatch_run_action "$@"
+      ;;
+    *)
+      herdwatch_usage
+      exit 2
+      ;;
+  esac
+}
+
+herdwatch_main "$@"
