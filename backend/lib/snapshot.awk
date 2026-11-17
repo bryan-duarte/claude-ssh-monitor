@@ -144,8 +144,13 @@ section == "containers" || section == "images" || section == "volumes" {
 
 function gpu_json() {
   if (!("gpu_name" in record)) return "null"
-  return "{\"name\":" json_string(record["gpu_name"]) ",\"pct\":" json_number(record["gpu_pct"]) \
-    ",\"mem_used_mib\":" json_number(record["gpu_mem_used_mib"]) ",\"mem_total_mib\":" json_number(record["gpu_mem_total_mib"]) "}"
+  return "{\"name\":" json_string(field("gpu_name")) ",\"pct\":" json_number(field("gpu_pct")) \
+    ",\"mem_used_mib\":" json_number(field("gpu_mem_used_mib")) ",\"mem_total_mib\":" json_number(field("gpu_mem_total_mib")) "}"
+}
+
+# Reads a record key. gawk 5.3 crashes when a missing array element is passed to a function and compared later.
+function field(key) {
+  return (key in record) ? record[key] : ""
 }
 
 function record_state() {
@@ -165,8 +170,8 @@ function is_port_tool(tool) {
 }
 
 function host_problems_json(   tools, tool_count, position, other_tools, problems_list) {
-  if (record["os"] == "unsupported") problems_list = problem_json("unsupported_os", "")
-  tool_count = split(record["missing_tools"], tools, " ")
+  if (field("os") == "unsupported") problems_list = problem_json("unsupported_os", "")
+  tool_count = split(field("missing_tools"), tools, " ")
   for (position = 1; position <= tool_count; position++) {
     if (is_port_tool(tools[position])) problems_list = joined(problems_list, problem_json("ports_hidden", tools[position]), ",")
     else other_tools = joined(other_tools, tools[position], " ")
@@ -177,7 +182,7 @@ function host_problems_json(   tools, tool_count, position, other_tools, problem
 
 # Without ss or lsof the host lists no ports at all, so no pinned port can count as stopped.
 function ports_are_hidden(   tools, tool_count, position) {
-  tool_count = split(record["missing_tools"], tools, " ")
+  tool_count = split(field("missing_tools"), tools, " ")
   for (position = 1; position <= tool_count; position++) if (is_port_tool(tools[position])) return 1
   return 0
 }
@@ -203,25 +208,25 @@ function print_list(rows) {
 function print_host(   key_list, key_count, position) {
   append_pinned_ports_that_stopped()
   printf "{\"label\":%s,\"target\":%s,\"state\":%s,\"reason\":%s,\"detail\":%s,\"os\":%s,\"load\":%s,\"home\":%s", \
-    json_string(label), json_string(target), json_string(record_state()), json_string(record["reason"]), \
-    json_string(record["detail"]), json_string(record["os"]), json_string(record["load"]), json_string(record["home"])
+    json_string(label), json_string(target), json_string(record_state()), json_string(field("reason")), \
+    json_string(field("detail")), json_string(field("os")), json_string(field("load")), json_string(field("home"))
   key_count = split(HOST_NUMBER_KEYS, key_list, " ")
-  for (position = 1; position <= key_count; position++) printf ",\"%s\":%s", key_list[position], json_number(record[key_list[position]])
-  printf ",\"cores\":%s,\"gpu\":%s,\"problems\":%s", json_number_list(record["cores"]), gpu_json(), host_problems_json()
+  for (position = 1; position <= key_count; position++) printf ",\"%s\":%s", key_list[position], json_number(field(key_list[position]))
+  printf ",\"cores\":%s,\"gpu\":%s,\"problems\":%s", json_number_list(field("cores")), gpu_json(), host_problems_json()
   printf ",\"processes\":[%s],\"agents\":[%s],\"ports\":[%s],\"sessions\":[%s]}", processes, agents, ports, sessions
 }
 
 function print_worktrees() {
   printf "{\"state\":%s,\"measured_at\":%s,\"reason\":%s,\"error\":%s,\"total_kb\":%d,\"items\":[%s]}", \
-    json_string(record_state()), json_number(record["measured_at"]), json_string(record["reason"]), \
-    json_string(record["error"]), worktree_total_kb, worktrees
+    json_string(record_state()), json_number(field("measured_at")), json_string(field("reason")), \
+    json_string(field("error")), worktree_total_kb, worktrees
 }
 
 function print_docker(   docker_state) {
   docker_state = docker_setting == "off" ? "off" : record_state()
   printf "{\"state\":%s,\"measured_at\":%s,\"reason\":%s,\"error\":%s,\"total_kb\":%d,\"reclaimable_kb\":%d", \
-    json_string(docker_state), json_number(record["measured_at"]), json_string(record["reason"]), \
-    json_string(record["error"]), record["total_kb"], record["reclaimable_kb"]
+    json_string(docker_state), json_number(field("measured_at")), json_string(field("reason")), \
+    json_string(field("error")), field("total_kb"), field("reclaimable_kb")
   printf ",\"containers\":[%s],\"images\":[%s],\"volumes\":[%s]}", docker_rows["containers"], docker_rows["images"], docker_rows["volumes"]
 }
 

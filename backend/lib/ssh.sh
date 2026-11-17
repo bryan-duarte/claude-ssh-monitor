@@ -55,6 +55,7 @@ herdwatch_start_master() {
 
 herdwatch_ensure_master() {
   local label="$1" target="$2" control_path pending_file
+  herdwatch_is_local_target "$target" && return 0
   control_path=$(herdwatch_control_path "$target")
   [ -n "$control_path" ] || return 0
   pending_file="$control_path.master-pending"
@@ -121,13 +122,26 @@ herdwatch_failure_detail() {
   printf '%s' "$detail" | cut -c1-"$ERROR_MESSAGE_MAX_CHARACTERS"
 }
 
+# A host whose target names this machine is probed without SSH: the same script runs in a
+# local shell, so a machine can watch itself without a key in its own authorized_keys.
+herdwatch_is_local_target() {
+  case "$1" in
+  localhost | 127.0.0.1 | ::1 | local) return 0 ;;
+  *) return 1 ;;
+  esac
+}
+
 # Returns WATCHDOG_EXIT_CODE when the watchdog stopped ssh, else the exit code of ssh.
 herdwatch_run_remote_script() {
   local target="$1" script_file="$2" remote_command="$3" timeout_seconds="$4" output_file="$5" stderr_file="$6"
   local script_pid watchdog_pid script_exit_code timeout_marker="$stderr_file.timeout"
   rm -f "$timeout_marker"
-  ssh "${HERDWATCH_SSH_OPTIONS[@]}" -o ControlMaster=no -- "$target" "$remote_command" \
-    <"$script_file" >"$output_file" 2>"$stderr_file" &
+  if herdwatch_is_local_target "$target"; then
+    (cd "$HOME" && sh -c "$remote_command") <"$script_file" >"$output_file" 2>"$stderr_file" &
+  else
+    ssh "${HERDWATCH_SSH_OPTIONS[@]}" -o ControlMaster=no -- "$target" "$remote_command" \
+      <"$script_file" >"$output_file" 2>"$stderr_file" &
+  fi
   script_pid=$!
   herdwatch_kill_after "$timeout_seconds" "$script_pid" "$timeout_marker" </dev/null >/dev/null 2>&1 &
   watchdog_pid=$!
@@ -146,6 +160,7 @@ herdwatch_run_remote_script() {
 # include a full SSH handshake, so the measure needs one.
 herdwatch_measure_rtt() {
   local target="$1"
+  herdwatch_is_local_target "$target" && return 0
   command -v perl >/dev/null 2>&1 || return 0
   herdwatch_master_is_running "$target" || return 0
   perl -MTime::HiRes=time -e '
